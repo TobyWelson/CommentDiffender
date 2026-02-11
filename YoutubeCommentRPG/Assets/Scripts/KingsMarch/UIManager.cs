@@ -142,6 +142,12 @@ public class UIManager : MonoBehaviour
     private Vector2 tutorialDragOffset;
     private GameObject tutorialArrowGroup;
 
+    // 3Dカメラプレビュー
+    private GameObject preview3DPanel;
+    private RawImage preview3DImage;
+    private GameObject backTo2DBtn;
+    private Text followTargetText;
+
     // YouTube/TikTok profile image cache
     private Dictionary<string, Texture2D> profileImageCache = new Dictionary<string, Texture2D>();
     private HashSet<string> profileImageLoading = new HashSet<string>();
@@ -247,6 +253,7 @@ public class UIManager : MonoBehaviour
         UpdateConnectionStatus();
         UpdateViewerList();
         UpdateTutorialEditDrag();
+        LateUpdate3DPreview();
     }
 
     // ─── HUD Update ──────────────────────────────────────────────
@@ -379,6 +386,12 @@ public class UIManager : MonoBehaviour
         // NPC陣形ボタンはバトル中のみ表示
         if (npcFormationPanel != null)
             npcFormationPanel.SetActive(phase != GamePhase.Title);
+
+        // 3Dプレビューはバトル中のみ
+        if (preview3DPanel != null)
+            preview3DPanel.SetActive(phase == GamePhase.Battle);
+        if (backTo2DBtn != null && phase != GamePhase.Battle)
+            backTo2DBtn.SetActive(false);
 
         // リスナーリストはTitle以外で表示可能
         if (viewerListToggleBtn != null)
@@ -1055,6 +1068,7 @@ public class UIManager : MonoBehaviour
         CreateDebugPanel();
         CreateHamburgerMenu();
         CreateViewerListPanel();
+        Create3DPreviewPanel();
     }
 
     void CreateTitleScreen()
@@ -5313,6 +5327,150 @@ public class UIManager : MonoBehaviour
             s += $" 矢({ap.x:F0},{ap.y:F0})";
         }
         tutorialEditPosLabel.text = s;
+    }
+
+    // ─── 3D Camera Preview ──────────────────────────────────────
+
+    void Create3DPreviewPanel()
+    {
+        // 右下にプレビューパネル（320x180）
+        preview3DPanel = new GameObject("3DPreviewPanel");
+        var panelRT = preview3DPanel.AddComponent<RectTransform>();
+        panelRT.SetParent(mainCanvas.transform, false);
+        panelRT.anchorMin = new Vector2(1, 0);
+        panelRT.anchorMax = new Vector2(1, 0);
+        panelRT.pivot = new Vector2(1, 0);
+        panelRT.anchoredPosition = new Vector2(-20, 20);
+        panelRT.sizeDelta = new Vector2(328, 188); // 320+8border, 180+8border
+
+        // フレーム背景
+        var frameBg = preview3DPanel.AddComponent<Image>();
+        frameBg.color = new Color(0.1f, 0.1f, 0.15f, 0.9f);
+
+        // RawImage（RenderTexture表示）
+        var rawGo = new GameObject("Preview3DRaw");
+        var rawRT = rawGo.AddComponent<RectTransform>();
+        rawRT.SetParent(panelRT, false);
+        rawRT.anchorMin = Vector2.zero;
+        rawRT.anchorMax = Vector2.one;
+        rawRT.offsetMin = new Vector2(4, 4);
+        rawRT.offsetMax = new Vector2(-4, -4);
+
+        preview3DImage = rawGo.AddComponent<RawImage>();
+        preview3DImage.color = Color.white;
+
+        // ボタン化（クリックでフルスクリーン切替）
+        var btn = rawGo.AddComponent<Button>();
+        btn.targetGraphic = preview3DImage;
+        var colors = btn.colors;
+        colors.highlightedColor = new Color(0.9f, 0.9f, 1f, 1f);
+        colors.pressedColor = new Color(0.7f, 0.7f, 0.8f, 1f);
+        btn.colors = colors;
+        btn.onClick.AddListener(() =>
+        {
+            if (AudioManager.Instance != null) AudioManager.Instance.PlaySE("ButtonClick");
+            CameraView3D.Instance?.ToggleFullScreen();
+        });
+
+        // 「3D」ラベル
+        var labelText = MakeText("3DLabel", panelRT, "3D",
+            18, Vector2.one, Vector2.one, Vector2.one,
+            new Vector2(-8, -6), new Vector2(40, 24), TextAnchor.UpperRight);
+        labelText.color = new Color(1f, 0.9f, 0.4f, 0.9f);
+
+        // 初期非表示
+        preview3DPanel.SetActive(false);
+
+        // 「2Dにもどす」ボタン（フルスクリーン時のみ表示）
+        var backGo = new GameObject("BackTo2DBtn");
+        var backRT = backGo.AddComponent<RectTransform>();
+        backRT.SetParent(mainCanvas.transform, false);
+        backRT.anchorMin = new Vector2(1, 1);
+        backRT.anchorMax = new Vector2(1, 1);
+        backRT.pivot = new Vector2(1, 1);
+        backRT.anchoredPosition = new Vector2(-20, -20);
+        backRT.sizeDelta = new Vector2(160, 44);
+
+        var backBg = backGo.AddComponent<Image>();
+        backBg.color = new Color(0.15f, 0.15f, 0.2f, 0.85f);
+
+        var backBtnComp = backGo.AddComponent<Button>();
+        backBtnComp.targetGraphic = backBg;
+        backBtnComp.onClick.AddListener(() =>
+        {
+            if (AudioManager.Instance != null) AudioManager.Instance.PlaySE("ButtonClick");
+            CameraView3D.Instance?.ToggleFullScreen();
+        });
+
+        var backLabel = MakeText("BackLabel", backRT, "2Dにもどす",
+            22, Vector2.zero, Vector2.one, new Vector2(0.5f, 0.5f),
+            Vector2.zero, Vector2.zero, TextAnchor.MiddleCenter);
+        backLabel.color = Color.white;
+
+        backTo2DBtn = backGo;
+        backTo2DBtn.SetActive(false);
+
+        // フォロー対象名テキスト（右上、backTo2Dの下）
+        followTargetText = MakeText("FollowTargetText", mainCanvas.transform, "",
+            24, new Vector2(1, 1), new Vector2(1, 1), new Vector2(1, 1),
+            new Vector2(-20, -70), new Vector2(300, 36), TextAnchor.MiddleRight);
+        followTargetText.color = new Color(1f, 1f, 0.8f, 0.95f);
+
+        // 背景パネル
+        var ftBg = new GameObject("FollowTargetBg");
+        var ftBgRT = ftBg.AddComponent<RectTransform>();
+        ftBgRT.SetParent(followTargetText.transform, false);
+        ftBgRT.anchorMin = Vector2.zero;
+        ftBgRT.anchorMax = Vector2.one;
+        ftBgRT.offsetMin = new Vector2(-8, -4);
+        ftBgRT.offsetMax = new Vector2(8, 4);
+        ftBg.transform.SetAsFirstSibling();
+        var ftBgImg = ftBg.AddComponent<Image>();
+        ftBgImg.color = new Color(0.1f, 0.1f, 0.15f, 0.7f);
+        ftBgImg.raycastTarget = false;
+
+        // 操作説明テキスト
+        var helpText = MakeText("3DHelpText", followTargetText.transform, "右ドラッグ:視点  中クリック/Tab:切替  スクロール:ズーム",
+            14, Vector2.zero, Vector2.one, new Vector2(1, 1),
+            new Vector2(0, -32), new Vector2(400, 24), TextAnchor.MiddleRight);
+        helpText.color = new Color(0.8f, 0.8f, 0.8f, 0.7f);
+
+        followTargetText.gameObject.SetActive(false);
+    }
+
+    /// <summary>CameraView3Dからのフルスクリーン切替通知</summary>
+    public void On3DFullScreenChanged(bool isFullScreen)
+    {
+        // プレビューパネル非表示 / 表示
+        if (preview3DPanel != null) preview3DPanel.SetActive(!isFullScreen);
+        // 「2Dにもどす」ボタン + フォロー対象名
+        if (backTo2DBtn != null) backTo2DBtn.SetActive(isFullScreen);
+        if (followTargetText != null)
+        {
+            followTargetText.gameObject.SetActive(isFullScreen);
+            if (isFullScreen && CameraView3D.Instance != null)
+                followTargetText.text = CameraView3D.Instance.FollowTargetName;
+        }
+    }
+
+    public void UpdateFollowTargetName(string name)
+    {
+        if (followTargetText != null)
+        {
+            followTargetText.text = name;
+            followTargetText.gameObject.SetActive(!string.IsNullOrEmpty(name) && CameraView3D.is3DFullScreen);
+        }
+    }
+
+    void LateUpdate3DPreview()
+    {
+        // RenderTextureをRawImageに反映
+        if (preview3DImage != null && CameraView3D.Instance != null && preview3DPanel.activeSelf)
+        {
+            var tex = CameraView3D.Instance.PreviewTexture;
+            if (tex != null && preview3DImage.texture != tex)
+                preview3DImage.texture = tex;
+        }
     }
 
     // ─── Helpers ────────────────────────────────────────────────

@@ -196,6 +196,10 @@ public class Unit : MonoBehaviour
 
         CreateHPBar();
         CreateNameLabel();
+
+        // 3Dビュー用コンポーネント
+        gameObject.AddComponent<Billboard3D>();
+        gameObject.AddComponent<BlobShadow3D>();
     }
 
     void Update()
@@ -243,6 +247,7 @@ public class Unit : MonoBehaviour
         UpdateHPBar();
         UpdateFaceIcon();
         UpdateSpeechBubble();
+        Update3DTextFlip();
         UpdateGlow();
         UpdateAura();
 
@@ -825,7 +830,7 @@ public class Unit : MonoBehaviour
         Vector3 endPos = target != null ? target.transform.position : startPos + Vector3.right * 3f;
 
         // 火球本体
-        var fireball = new GameObject("Fireball");
+        var fireball = MakeVFX("Fireball");
         fireball.transform.position = startPos;
         var fbSr = fireball.AddComponent<SpriteRenderer>();
         fbSr.sprite = CreatePixelSprite();
@@ -1006,7 +1011,7 @@ public class Unit : MonoBehaviour
             goSr.color = new Color(goSr.color.r, goSr.color.g, goSr.color.b, 1f - t);
             float s = go.transform.localScale.x * (1f - Time.deltaTime * 2f);
             go.transform.localScale = new Vector3(Mathf.Max(0.01f, s), Mathf.Max(0.01f, s), 1f);
-            if (rise) go.transform.position = startPos + Vector3.up * riseSpeed * elapsed;
+            if (rise) go.transform.position = startPos + VFXUp() * riseSpeed * elapsed;
             yield return null;
         }
         if (go != null) Destroy(go);
@@ -1351,6 +1356,14 @@ public class Unit : MonoBehaviour
         var shadowMr = shadowGo.GetComponent<MeshRenderer>();
         if (shadowMr != null) shadowMr.sortingOrder = 51;
 
+        // 3Dモード用: 親のBillboard3Dに子ターゲットとして登録
+        var bb = GetComponent<Billboard3D>();
+        if (bb != null)
+        {
+            bb.childCylindricalTargets.Add(labelGo.transform);
+            bb.childCylindricalTargets.Add(shadowGo.transform);
+        }
+
         UpdateNameLabel();
     }
 
@@ -1378,6 +1391,25 @@ public class Unit : MonoBehaviour
             nameShadow.transform.localPosition = new Vector3(0.01f * clamp, labelY - 0.01f * clamp, 0);
             nameShadow.characterSize = 0.1f * clamp;
         }
+    }
+
+    /// <summary>3Dビルボード時のテキスト左右反転を補正（+Z=カメラ方向でTextMeshが裏返る）</summary>
+    void Update3DTextFlip()
+    {
+        if (!CameraView3D.is3DFullScreen)
+        {
+            // 2D復帰: 3Dで設定したX反転をリセット
+            if (nameLabel != null && nameLabel.transform.localScale.x < 0)
+                nameLabel.transform.localScale = Vector3.one;
+            if (nameShadow != null && nameShadow.transform.localScale.x < 0)
+                nameShadow.transform.localScale = Vector3.one;
+            return;
+        }
+        // 3D: 名前ラベルのX反転のみ
+        if (nameLabel != null)
+            nameLabel.transform.localScale = new Vector3(-1f, 1f, 1f);
+        if (nameShadow != null)
+            nameShadow.transform.localScale = new Vector3(-1f, 1f, 1f);
     }
 
     // ─── Face Icon (Profile Image) ──────────────────────────
@@ -1867,28 +1899,31 @@ public class Unit : MonoBehaviour
         float dampInv2 = Mathf.Pow(ps2, -0.6f);
         speechBubbleGo.transform.localScale = new Vector3(dampInv2, dampInv2, 1f);
 
-        // MeshRendererのboundsから実際のテキスト描画サイズを取得
-        var textMr = speechText.GetComponent<MeshRenderer>();
-        float padding = 0.3f;
+        // テキスト内容から吹き出しサイズを計算
         float bgWidth, bgHeight;
-        // lossyScaleでワールド座標→ローカル空間に変換（背景はspeechBubbleGoの子）
+        var textMr = speechText.GetComponent<MeshRenderer>();
         float ws = Mathf.Max(speechBubbleGo.transform.lossyScale.x, 0.01f);
-        if (textMr != null && textMr.bounds.size.magnitude > 0.01f)
+        bool rotClean = speechBubbleGo.transform.rotation == Quaternion.identity;
+        if (rotClean && textMr != null && textMr.bounds.size.magnitude > 0.01f)
         {
-            // boundsはワールド座標 → ローカル空間に変換してpadding追加
-            bgWidth = textMr.bounds.size.x / ws + padding;
-            bgHeight = textMr.bounds.size.y / ws + padding;
+            // 2D: boundsから実測（回転なしなら正確）
+            bgWidth = textMr.bounds.size.x / ws * 1.15f + 0.8f;
+            bgHeight = textMr.bounds.size.y / ws + 0.6f;
         }
         else
         {
-            // フォールバック（ローカル空間で計算）
-            int lineCount = 1;
-            foreach (char c in wrapped) if (c == '\n') lineCount++;
-            bgWidth = Mathf.Max(1.5f, maxCharsPerLine * 0.18f + padding);
-            bgHeight = Mathf.Max(0.5f, lineCount * 0.45f + padding);
+            // 3D回転中 or bounds未初期化: 文字数ベースで推定
+            int maxLineLen2 = 0; int curLineLen = 0; int lineCount2 = 1;
+            foreach (char c in wrapped)
+            {
+                if (c == '\n') { lineCount2++; curLineLen = 0; }
+                else { curLineLen++; if (curLineLen > maxLineLen2) maxLineLen2 = curLineLen; }
+            }
+            bgWidth = Mathf.Max(1.5f, maxLineLen2 * 0.35f + 0.8f);
+            bgHeight = Mathf.Max(0.8f, lineCount2 * 0.5f + 0.6f);
         }
-        bgWidth = Mathf.Max(1.0f, bgWidth);
-        bgHeight = Mathf.Max(0.5f, bgHeight);
+        bgWidth = Mathf.Max(1.5f, bgWidth);
+        bgHeight = Mathf.Max(0.8f, bgHeight);
         // スプライトのネイティブサイズで正規化してテキストにフィット
         float sprW = speechBg.sprite != null ? speechBg.sprite.bounds.size.x : 1f;
         float sprH = speechBg.sprite != null ? speechBg.sprite.bounds.size.y : 1f;
@@ -1923,7 +1958,7 @@ public class Unit : MonoBehaviour
     void CreateSpeechBubble()
     {
         speechBubbleGo = new GameObject("SpeechBubble");
-        speechBubbleGo.transform.SetParent(transform);
+        speechBubbleGo.transform.SetParent(transform, false);
         // キャラの頭上に配置 (スプライト上端 y=3.5 + クリアランス)
         speechBubbleGo.transform.localPosition = new Vector3(0, 5.0f, 0);
 
@@ -1946,7 +1981,7 @@ public class Unit : MonoBehaviour
         speechText.GetComponent<MeshRenderer>().material = GetFont().material;
         speechText.text = "";
         speechText.fontSize = 28;
-        speechText.characterSize = 0.12f;
+        speechText.characterSize = 0.07f;
         speechText.anchor = TextAnchor.MiddleCenter;
         speechText.alignment = TextAlignment.Center;
         speechText.color = Color.black;
@@ -2400,6 +2435,23 @@ public class Unit : MonoBehaviour
         isUltimateActive = false; // 必殺技終了
     }
 
+    // ─── VFX 3D Billboard ──────────────────────────────────────
+
+    /// <summary>VFXオブジェクト生成: 3Dフルスクリーン時はBillboard3Dを自動付与</summary>
+    static GameObject MakeVFX(string name)
+    {
+        var go = new GameObject(name);
+        if (CameraView3D.is3DFullScreen)
+            go.AddComponent<Billboard3D>();
+        return go;
+    }
+
+    /// <summary>VFX用「上方向」: 3Dフルスクリーン時はZ方向(=上)</summary>
+    static Vector3 VFXUp()
+    {
+        return CameraView3D.is3DFullScreen ? Vector3.forward : Vector3.up;
+    }
+
     // ─── 必殺技 VFX ヘルパー ────────────────────────────────────
 
     /// <summary>溜め中の集中線（スピードライン）</summary>
@@ -2495,7 +2547,7 @@ public class Unit : MonoBehaviour
     /// <summary>地面発光エフェクト</summary>
     System.Collections.IEnumerator SpawnGroundGlow(Vector3 pos, Color color, float radius = 0.8f)
     {
-        var glow = new GameObject("GroundGlow");
+        var glow = MakeVFX("GroundGlow");
         glow.transform.position = pos;
         var gSr = glow.AddComponent<SpriteRenderer>();
         gSr.sprite = CreateMagicCircleSprite();
@@ -2522,7 +2574,7 @@ public class Unit : MonoBehaviour
     /// <summary>光柱エフェクト（上に伸びる太い光）</summary>
     System.Collections.IEnumerator SpawnLightPillar(Vector3 pos, Color color, float height = 6f)
     {
-        var pillar = new GameObject("LightPillar");
+        var pillar = MakeVFX("LightPillar");
         pillar.transform.position = pos;
         var pSr = pillar.AddComponent<SpriteRenderer>();
         pSr.sprite = CreatePixelSprite();
@@ -2540,7 +2592,7 @@ public class Unit : MonoBehaviour
             float h = Mathf.Lerp(0f, height, Mathf.Min(t * 4f, 1f));
             float w = 0.6f * (1f - t * 0.3f);
             pillar.transform.localScale = new Vector3(w, h, 1f);
-            pillar.transform.position = pos + Vector3.up * h * 0.5f;
+            pillar.transform.position = pos + VFXUp() * h * 0.5f;
             float a = t < 0.6f ? 0.8f : 0.8f * (1f - (t - 0.6f) / 0.4f);
             pSr.color = new Color(color.r, color.g, color.b, Mathf.Max(0, a));
             yield return null;
@@ -2554,7 +2606,7 @@ public class Unit : MonoBehaviour
         // 縦と横の光線
         for (int axis = 0; axis < 2; axis++)
         {
-            var line = new GameObject("HolyCross");
+            var line = MakeVFX("HolyCross");
             line.transform.position = pos;
             var lSr = line.AddComponent<SpriteRenderer>();
             lSr.sprite = CreatePixelSprite();
@@ -2622,7 +2674,7 @@ public class Unit : MonoBehaviour
     /// <summary>溜め演出: 拡大するオーラ円</summary>
     System.Collections.IEnumerator UltimateChargeAura(Color color, float duration, float maxRadius)
     {
-        var auraGo = new GameObject("UltChargeAura");
+        var auraGo = MakeVFX("UltChargeAura");
         auraGo.transform.position = transform.position;
         var auraSr = auraGo.AddComponent<SpriteRenderer>();
         auraSr.sprite = CreateMagicCircleSprite();
@@ -2859,7 +2911,7 @@ public class Unit : MonoBehaviour
         var bladeShader = Shader.Find("GUI/Text Shader");
 
         // === 光剣の生成 ===
-        var swordRoot = new GameObject("HolySword");
+        var swordRoot = MakeVFX("HolySword");
         Vector3 rootOffset = new Vector3(0.2f, 0.5f, 0);
         swordRoot.transform.position = transform.position + rootOffset;
 
@@ -3015,7 +3067,7 @@ public class Unit : MonoBehaviour
     /// <summary>光剣の残像（指定角度で留まってフェードアウト）</summary>
     System.Collections.IEnumerator SpawnSwordAfterimage(Vector3 pos, float angle, float startAlpha)
     {
-        var afterRoot = new GameObject("SwordAfterimage");
+        var afterRoot = MakeVFX("SwordAfterimage");
         afterRoot.transform.position = pos;
         afterRoot.transform.rotation = Quaternion.Euler(0, 0, angle);
 
@@ -3087,7 +3139,7 @@ public class Unit : MonoBehaviour
     /// <summary>斬撃ラインVFX（白→色にフェード）</summary>
     System.Collections.IEnumerator SlashLineVFX(Vector3 center, Vector2 dir, Color color, float length)
     {
-        var lineGo = new GameObject("SlashLine");
+        var lineGo = MakeVFX("SlashLine");
         lineGo.transform.position = center;
         var lineSr = lineGo.AddComponent<SpriteRenderer>();
         lineSr.sprite = CreatePixelSprite();
@@ -3118,7 +3170,7 @@ public class Unit : MonoBehaviour
     System.Collections.IEnumerator SpawnAfterimage(Vector3 pos, Color tint)
     {
         if (sr == null) yield break;
-        var afterGo = new GameObject("Afterimage");
+        var afterGo = MakeVFX("Afterimage");
         afterGo.transform.position = pos;
         afterGo.transform.localScale = transform.localScale;
         var afterSr = afterGo.AddComponent<SpriteRenderer>();
@@ -3174,7 +3226,7 @@ public class Unit : MonoBehaviour
         Vector3 startPos = targetPos + new Vector3(Random.Range(-0.3f, 0.3f), 5f + Random.Range(0f, 1.5f), 0);
         Vector3 endPos = targetPos + new Vector3(Random.Range(-0.15f, 0.15f), 0, 0);
 
-        var spear = new GameObject("FallingSpear");
+        var spear = MakeVFX("FallingSpear");
         spear.transform.position = startPos;
         Destroy(spear, 2.5f); // 安全装置: 何があっても2.5秒で消える
         var spSr = spear.AddComponent<SpriteRenderer>();
@@ -3286,7 +3338,7 @@ public class Unit : MonoBehaviour
     System.Collections.IEnumerator SpawnHealPillar(Vector3 basePos, Color color)
     {
         // 細い光の柱を下から上に伸ばす
-        var pillar = new GameObject("HealPillar");
+        var pillar = MakeVFX("HealPillar");
         pillar.transform.position = basePos;
         var pilSr = pillar.AddComponent<SpriteRenderer>();
         pilSr.sprite = CreatePixelSprite();
@@ -3305,7 +3357,7 @@ public class Unit : MonoBehaviour
             float h = Mathf.Lerp(0.1f, 4f, Mathf.Min(t * 3f, 1f));
             float w = 0.3f * (1f - t * 0.5f);
             pillar.transform.localScale = new Vector3(w, h, 1f);
-            pillar.transform.position = basePos + Vector3.up * h * 0.5f;
+            pillar.transform.position = basePos + VFXUp() * h * 0.5f;
             float alpha = t < 0.5f ? color.a : color.a * (1f - (t - 0.5f) * 2f);
             pilSr.color = new Color(color.r, color.g, color.b, Mathf.Max(0, alpha));
             // 光の粒子
@@ -3392,7 +3444,7 @@ public class Unit : MonoBehaviour
         StartCoroutine(MeteorShadowGrow(shadow, shSr, 0.4f));
 
         // 隕石本体（大きな火球）
-        var meteor = new GameObject("Meteor");
+        var meteor = MakeVFX("Meteor");
         meteor.transform.position = startPos;
 
         // 外殻（赤橙の炎）
@@ -3506,7 +3558,7 @@ public class Unit : MonoBehaviour
     /// <summary>着弾フラッシュ（巨大な白い光が一瞬広がって消える）</summary>
     System.Collections.IEnumerator MeteorImpactFlash(Vector3 pos)
     {
-        var flash = new GameObject("ImpactFlash");
+        var flash = MakeVFX("ImpactFlash");
         flash.transform.position = pos;
         var fSr = flash.AddComponent<SpriteRenderer>();
         fSr.sprite = CreatePixelSprite();

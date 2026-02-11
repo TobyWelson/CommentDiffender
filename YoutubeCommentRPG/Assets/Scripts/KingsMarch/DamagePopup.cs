@@ -51,7 +51,19 @@ public class DamagePopup : MonoBehaviour
     void Update()
     {
         timer -= Time.deltaTime;
-        transform.position += Vector3.up * GameConfig.DamagePopupRiseSpeed * Time.deltaTime;
+
+        // 3Dフルスクリーン時: Z方向(上)に上昇 + カメラを向く
+        if (CameraView3D.is3DFullScreen)
+        {
+            transform.position += Vector3.forward * GameConfig.DamagePopupRiseSpeed * Time.deltaTime;
+            var cam = CameraView3D.Instance?.Camera3D;
+            if (cam != null)
+                transform.rotation = Quaternion.LookRotation(cam.transform.forward, cam.transform.up);
+        }
+        else
+        {
+            transform.position += Vector3.up * GameConfig.DamagePopupRiseSpeed * Time.deltaTime;
+        }
 
         float alpha = Mathf.Clamp01(timer / GameConfig.DamagePopupDuration);
         tmp.color = new Color(startColor.r, startColor.g, startColor.b, alpha);

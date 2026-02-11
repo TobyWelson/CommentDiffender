@@ -31,6 +31,15 @@ public class Castle : MonoBehaviour
         castleSr = GetComponent<SpriteRenderer>();
         originalPos = transform.position;
         originalScale = transform.localScale;
+
+        // 3Dビュー用コンポーネント
+        if (GetComponent<Billboard3D>() == null)
+        {
+            var bb = gameObject.AddComponent<Billboard3D>();
+            bb.cylindrical = true; // 床に立つように見せる（上から見ても地面に潜らない）
+            // groundOffset=0: スプライトをz=0(地面)にそのまま配置
+        }
+        if (GetComponent<BlobShadow3D>() == null) gameObject.AddComponent<BlobShadow3D>();
     }
 
     public void TakeDamage(int damage)

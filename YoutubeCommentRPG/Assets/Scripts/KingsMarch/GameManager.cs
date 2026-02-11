@@ -106,6 +106,7 @@ public class GameManager : MonoBehaviour
         if (GetComponent<TikTokChatManager>() == null) gameObject.AddComponent<TikTokChatManager>();
         GetComponent<TikTokChatManager>().enabled = false;
         if (GetComponent<AudioManager>() == null) gameObject.AddComponent<AudioManager>();
+        if (GetComponent<CameraView3D>() == null) gameObject.AddComponent<CameraView3D>();
     }
 
     void Start()
@@ -444,6 +445,14 @@ public class GameManager : MonoBehaviour
     {
         currentPhase = phase;
         OnPhaseChanged?.Invoke(phase);
+
+        // 3Dカメラプレビュー制御
+        var cam3d = GetComponent<CameraView3D>();
+        if (cam3d != null)
+        {
+            if (phase == GamePhase.Battle) cam3d.EnablePreview();
+            else cam3d.DisablePreview();
+        }
     }
 
     public void StartWave()
@@ -1267,8 +1276,7 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        // ギフト名をスピーチバブルで表示
-        ShowViewerSpeech(viewerName, displayText);
+        // ギフト名はポップアップUIで表示（吹き出しには出さない）
 
         if (AudioManager.Instance != null) AudioManager.Instance.PlaySE("SuperChat");
         CameraShake.Shake(0.2f + tier * 0.1f, 0.05f + tier * 0.03f);
