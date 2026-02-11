@@ -1,0 +1,40 @@
+# OAuth credentials (secret)
+**/OAuthCredentials.cs
+
+# Unity
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+/[Aa]ssets/Plugins/Editor/JetBrains*
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Node
+node_modules/
+
+# Build artifacts
+tiktok-proxy/dist/
+
+# Claude
+.claude/

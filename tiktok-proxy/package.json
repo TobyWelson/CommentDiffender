@@ -1,0 +1,21 @@
+{
+  "name": "tiktok-proxy",
+  "version": "1.0.0",
+  "description": "TikTok LIVE proxy for King's March",
+  "main": "server.js",
+  "bin": "server.js",
+  "dependencies": {
+    "tiktok-live-connector": "^2.1.1-beta1",
+    "ws": "^8.16.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "build": "npx pkg . --target node18-win-x64 --output dist/tiktok-proxy.exe"
+  },
+  "pkg": {
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "dist"
+  }
+}
