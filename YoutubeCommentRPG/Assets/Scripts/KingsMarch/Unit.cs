@@ -1922,10 +1922,8 @@ public class Unit : MonoBehaviour
         speechText.gameObject.SetActive(!in3D);
         speechText3D.gameObject.SetActive(in3D);
 
-        // 吹き出しは体に比例するが成長率を抑制（40%の成長率）
-        float ps2 = Mathf.Max(transform.localScale.x, 0.1f);
-        float dampInv2 = Mathf.Pow(ps2, -0.6f);
-        speechBubbleGo.transform.localScale = new Vector3(dampInv2, dampInv2, 1f);
+        // ルートレベルの位置・回転・スケールを設定
+        UpdateSpeechBubbleTransform();
 
         // アクティブなTextMeshのmesh.boundsから吹き出しサイズを計算
         ResizeSpeechBg(in3D ? speechText3D : speechText);
@@ -1956,10 +1954,9 @@ public class Unit : MonoBehaviour
 
     void CreateSpeechBubble()
     {
+        // ルートレベルオブジェクト（親の非一様スケール+回転の影響を完全排除）
         speechBubbleGo = new GameObject("SpeechBubble");
-        speechBubbleGo.transform.SetParent(transform, false);
-        // キャラの頭上に配置 (スプライト上端 y=3.5 + クリアランス)
-        speechBubbleGo.transform.localPosition = new Vector3(0, 5.0f, 0);
+        // 親なし: 位置・回転・スケールはUpdateSpeechBubbleで毎フレーム管理
 
         // 吹き出し背景（hukidasi画像、尻尾付き）
         var bgGo = new GameObject("BubbleBg");
@@ -1969,7 +1966,6 @@ public class Unit : MonoBehaviour
         speechBg.sprite = GetHukidasiSprite();
         speechBg.color = Color.white;
         speechBg.sortingOrder = 98;
-        // 初期スケールはShowSpeechBubbleで動的に設定
 
         // テキスト 2D用（黒文字、characterSize=0.07f）
         var textGo = new GameObject("BubbleText");
@@ -2012,10 +2008,8 @@ public class Unit : MonoBehaviour
     {
         if (speechBubbleGo == null || !speechBubbleGo.activeSelf) return;
 
-        // 吹き出しは体に比例するが成長率を抑制（40%の成長率）
-        float ps = Mathf.Max(transform.localScale.x, 0.1f);
-        float dampInv = Mathf.Pow(ps, -0.6f); // world size = ps^0.4（緩やかに成長）
-        speechBubbleGo.transform.localScale = new Vector3(dampInv, dampInv, 1f);
+        // ルートレベルオブジェクトの位置・回転・スケールを毎フレーム管理
+        UpdateSpeechBubbleTransform();
 
         speechTimer -= Time.deltaTime;
 
@@ -2040,21 +2034,69 @@ public class Unit : MonoBehaviour
         }
     }
 
+    /// <summary>ルートレベルspeechBubbleGoの位置・回転・スケールを毎フレーム設定</summary>
+    void UpdateSpeechBubbleTransform()
+    {
+        if (speechBubbleGo == null) return;
+
+        float ps = Mathf.Max(transform.localScale.x, 0.1f);
+        float dampInv = Mathf.Pow(ps, -0.6f);
+
+        // 高さオフセット: 旧localPos(0,5,0) は親スケール経由でworld=5*ps
+        float heightOffset = 5f * ps;
+        if (CameraView3D.is3DFullScreen)
+        {
+            // 3D: 旧コードと同じ実効worldScale = ps * dampInv = ps^0.4
+            float ws = ps * dampInv;
+            speechBubbleGo.transform.localScale = new Vector3(ws, ws, 1f);
+
+            // Z-up: Zが高さ方向
+            speechBubbleGo.transform.position = transform.position + new Vector3(0, 0, heightOffset);
+
+            // 回転: カメラ方向にシリンドリカルビルボード（Z-up）
+            var cam3d = CameraView3D.Instance?.Camera3D;
+            if (cam3d != null)
+            {
+                Vector3 dir = cam3d.transform.position - speechBubbleGo.transform.position;
+                dir.z = 0f;
+                if (dir.sqrMagnitude > 0.001f)
+                    speechBubbleGo.transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.forward);
+            }
+        }
+        else
+        {
+            // 2D: dampInvをそのまま使う（テキストサイズが旧コードと一致）
+            speechBubbleGo.transform.localScale = new Vector3(dampInv, dampInv, 1f);
+
+            // Yが高さ方向、回転なし
+            speechBubbleGo.transform.position = transform.position + new Vector3(0, heightOffset, 0);
+            speechBubbleGo.transform.rotation = Quaternion.identity;
+        }
+    }
+
+    void OnDestroy()
+    {
+        // ルートレベルの吹き出しを手動クリーンアップ
+        if (speechBubbleGo != null) Destroy(speechBubbleGo);
+    }
+
     /// <summary>アクティブなTextMeshのmesh.boundsから吹き出し背景サイズを計算（回転非依存）</summary>
     void ResizeSpeechBg(TextMesh activeText)
     {
         if (activeText == null || speechBg == null) return;
         var mf = activeText.GetComponent<MeshFilter>();
         float bgWidth, bgHeight;
-        // 3DテキストはcharacterSize=1.8倍でmesh.boundsも大きいのでパディングを控えめに
         bool is3DText = (activeText == speechText3D);
-        float wMul = is3DText ? 1.15f : 1.3f;
-        float wPad = is3DText ? 0.8f : 1.0f;
+        // 2Dルートレベル(dampInvスケール)ではパディングを縮小して吹き出し画像を引き締め
+        // 3Dは旧コードと同等のwsスケールなので従来のパディングを使用
+        float wMul = is3DText ? 1.15f : 1.02f;
+        float wPad = is3DText ? 0.8f : 0.15f;
+        float hPad = is3DText ? 0.6f : 0.05f;
         if (mf != null && mf.sharedMesh != null && mf.sharedMesh.bounds.size.magnitude > 0.01f)
         {
             Bounds lb = mf.sharedMesh.bounds;
             bgWidth = lb.size.x * wMul + wPad;
-            bgHeight = lb.size.y + 0.6f;
+            bgHeight = lb.size.y + hPad;
         }
         else
         {
@@ -2065,9 +2107,9 @@ public class Unit : MonoBehaviour
                 if (c == '\n') { lines++; curLen = 0; }
                 else { curLen++; if (curLen > maxLineLen) maxLineLen = curLen; }
             }
-            float cPad = is3DText ? 0.35f : 0.4f;
+            float cPad = is3DText ? 0.35f : 0.2f;
             bgWidth = Mathf.Max(1.5f, maxLineLen * cPad + wPad);
-            bgHeight = Mathf.Max(0.8f, lines * 0.5f + 0.6f);
+            bgHeight = Mathf.Max(0.8f, lines * 0.5f + hPad);
         }
         bgWidth = Mathf.Max(1.5f, bgWidth);
         bgHeight = Mathf.Max(0.8f, bgHeight);
