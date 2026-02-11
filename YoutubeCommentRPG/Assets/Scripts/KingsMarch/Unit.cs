@@ -92,7 +92,8 @@ public class Unit : MonoBehaviour
 
     // Speech bubble
     private GameObject speechBubbleGo;
-    private TextMesh speechText;
+    private TextMesh speechText;      // 2D用 (characterSize=0.07f)
+    private TextMesh speechText3D;    // 3D用 (characterSize=0.126f, X反転済み)
     private SpriteRenderer speechBg;
     // speechTail削除: hukidasi画像に尻尾が含まれるため不要
     private float speechTimer;
@@ -1403,8 +1404,16 @@ public class Unit : MonoBehaviour
                 nameLabel.transform.localScale = Vector3.one;
             if (nameShadow != null && nameShadow.transform.localScale.x < 0)
                 nameShadow.transform.localScale = Vector3.one;
-            if (speechText != null && speechText.transform.localScale.x < 0)
-                speechText.transform.localScale = Vector3.one;
+            // 2D復帰: 3D用テキストを非表示にし2D用を表示
+            if (speechText != null && speechText3D != null && speechBubbleGo != null && speechBubbleGo.activeSelf)
+            {
+                if (!speechText.gameObject.activeSelf)
+                {
+                    speechText.gameObject.SetActive(true);
+                    speechText3D.gameObject.SetActive(false);
+                    ResizeSpeechBg(speechText);
+                }
+            }
             return;
         }
         // 3D: テキストのX反転
@@ -1412,8 +1421,16 @@ public class Unit : MonoBehaviour
             nameLabel.transform.localScale = new Vector3(-1f, 1f, 1f);
         if (nameShadow != null)
             nameShadow.transform.localScale = new Vector3(-1f, 1f, 1f);
-        if (speechText != null)
-            speechText.transform.localScale = new Vector3(-1f, 1f, 1f);
+        // 3D: speechText3Dを表示（作成時にX反転済み）
+        if (speechText != null && speechText3D != null && speechBubbleGo != null && speechBubbleGo.activeSelf)
+        {
+            if (!speechText3D.gameObject.activeSelf)
+            {
+                speechText3D.gameObject.SetActive(true);
+                speechText.gameObject.SetActive(false);
+                ResizeSpeechBg(speechText3D);
+            }
+        }
     }
 
     // ─── Face Icon (Profile Image) ──────────────────────────
@@ -1894,46 +1911,24 @@ public class Unit : MonoBehaviour
         const int maxCharsPerLine = 15;
         string wrapped = WrapText(message, maxCharsPerLine);
 
+        // 両方のTextMeshにテキスト設定（プロパティは作成後に変更しない）
         speechText.text = wrapped;
+        speechText3D.text = wrapped;
         speechTimer = Mathf.Max(4f, message.Length * 0.05f);
         speechBubbleGo.SetActive(true);
+
+        // モードに応じて正しいTextMeshを表示
+        bool in3D = CameraView3D.is3DFullScreen;
+        speechText.gameObject.SetActive(!in3D);
+        speechText3D.gameObject.SetActive(in3D);
 
         // 吹き出しは体に比例するが成長率を抑制（40%の成長率）
         float ps2 = Mathf.Max(transform.localScale.x, 0.1f);
         float dampInv2 = Mathf.Pow(ps2, -0.6f);
         speechBubbleGo.transform.localScale = new Vector3(dampInv2, dampInv2, 1f);
 
-        // テキスト内容から吹き出しサイズを計算
-        float bgWidth, bgHeight;
-        var textMr = speechText.GetComponent<MeshRenderer>();
-        float ws = Mathf.Max(speechBubbleGo.transform.lossyScale.x, 0.01f);
-        bool rotClean = speechBubbleGo.transform.rotation == Quaternion.identity;
-        if (rotClean && textMr != null && textMr.bounds.size.magnitude > 0.01f)
-        {
-            // 2D: boundsから実測（回転なしなら正確）
-            bgWidth = textMr.bounds.size.x / ws * 1.15f + 0.8f;
-            bgHeight = textMr.bounds.size.y / ws + 0.6f;
-        }
-        else
-        {
-            // 3D回転中 or bounds未初期化: 文字数ベースで推定
-            int maxLineLen2 = 0; int curLineLen = 0; int lineCount2 = 1;
-            foreach (char c in wrapped)
-            {
-                if (c == '\n') { lineCount2++; curLineLen = 0; }
-                else { curLineLen++; if (curLineLen > maxLineLen2) maxLineLen2 = curLineLen; }
-            }
-            bgWidth = Mathf.Max(1.5f, maxLineLen2 * 0.35f + 0.8f);
-            bgHeight = Mathf.Max(0.8f, lineCount2 * 0.5f + 0.6f);
-        }
-        bgWidth = Mathf.Max(1.5f, bgWidth);
-        bgHeight = Mathf.Max(0.8f, bgHeight);
-        // スプライトのネイティブサイズで正規化してテキストにフィット
-        float sprW = speechBg.sprite != null ? speechBg.sprite.bounds.size.x : 1f;
-        float sprH = speechBg.sprite != null ? speechBg.sprite.bounds.size.y : 1f;
-        speechBg.transform.localScale = new Vector3(bgWidth / sprW, bgHeight / sprH, 1f);
-
-        // hukidasi画像に尻尾が含まれるため個別の尻尾オブジェクトは不要
+        // アクティブなTextMeshのmesh.boundsから吹き出しサイズを計算
+        ResizeSpeechBg(in3D ? speechText3D : speechText);
     }
 
     string WrapText(string text, int maxCharsPerLine)
@@ -1976,7 +1971,7 @@ public class Unit : MonoBehaviour
         speechBg.sortingOrder = 98;
         // 初期スケールはShowSpeechBubbleで動的に設定
 
-        // テキスト（黒文字）
+        // テキスト 2D用（黒文字、characterSize=0.07f）
         var textGo = new GameObject("BubbleText");
         textGo.transform.SetParent(speechBubbleGo.transform);
         textGo.transform.localPosition = new Vector3(0, 0.1f, 0);
@@ -1991,6 +1986,24 @@ public class Unit : MonoBehaviour
         speechText.color = Color.black;
         var mr = textGo.GetComponent<MeshRenderer>();
         if (mr != null) mr.sortingOrder = 99;
+
+        // テキスト 3D用（大きいcharacterSize、X反転済み、作成後プロパティ変更なし）
+        var textGo3D = new GameObject("BubbleText3D");
+        textGo3D.transform.SetParent(speechBubbleGo.transform);
+        textGo3D.transform.localPosition = new Vector3(0, 0.1f, 0);
+        speechText3D = textGo3D.AddComponent<TextMesh>();
+        speechText3D.font = GetFont();
+        speechText3D.GetComponent<MeshRenderer>().material = GetFont().material;
+        speechText3D.text = "";
+        speechText3D.fontSize = 28;
+        speechText3D.characterSize = 0.126f; // 0.07f * 1.8
+        speechText3D.anchor = TextAnchor.MiddleCenter;
+        speechText3D.alignment = TextAlignment.Center;
+        speechText3D.color = Color.black;
+        textGo3D.transform.localScale = new Vector3(-1f, 1f, 1f); // 3Dビルボード用X反転
+        var mr3D = textGo3D.GetComponent<MeshRenderer>();
+        if (mr3D != null) mr3D.sortingOrder = 99;
+        textGo3D.SetActive(false); // 初期は非表示
 
         speechBubbleGo.SetActive(false);
     }
@@ -2011,22 +2024,51 @@ public class Unit : MonoBehaviour
         {
             float alpha = speechTimer / 0.5f;
             if (speechBg != null)
-            {
                 speechBg.color = new Color(1f, 1f, 1f, alpha);
-            }
             if (speechText != null)
-            {
                 speechText.color = new Color(0f, 0f, 0f, alpha);
-            }
+            if (speechText3D != null)
+                speechText3D.color = new Color(0f, 0f, 0f, alpha);
         }
 
         if (speechTimer <= 0f)
         {
             speechBubbleGo.SetActive(false);
-            // Reset colors
             if (speechBg != null) speechBg.color = Color.white;
             if (speechText != null) speechText.color = Color.black;
+            if (speechText3D != null) speechText3D.color = Color.black;
         }
+    }
+
+    /// <summary>アクティブなTextMeshのmesh.boundsから吹き出し背景サイズを計算（回転非依存）</summary>
+    void ResizeSpeechBg(TextMesh activeText)
+    {
+        if (activeText == null || speechBg == null) return;
+        var mf = activeText.GetComponent<MeshFilter>();
+        float bgWidth, bgHeight;
+        if (mf != null && mf.sharedMesh != null && mf.sharedMesh.bounds.size.magnitude > 0.01f)
+        {
+            Bounds lb = mf.sharedMesh.bounds;
+            bgWidth = lb.size.x * 1.15f + 0.8f;
+            bgHeight = lb.size.y + 0.6f;
+        }
+        else
+        {
+            string txt = activeText.text ?? "";
+            int maxLineLen = 0; int curLen = 0; int lines = 1;
+            foreach (char c in txt)
+            {
+                if (c == '\n') { lines++; curLen = 0; }
+                else { curLen++; if (curLen > maxLineLen) maxLineLen = curLen; }
+            }
+            bgWidth = Mathf.Max(1.5f, maxLineLen * 0.35f + 0.8f);
+            bgHeight = Mathf.Max(0.8f, lines * 0.5f + 0.6f);
+        }
+        bgWidth = Mathf.Max(1.5f, bgWidth);
+        bgHeight = Mathf.Max(0.8f, bgHeight);
+        float sprW = speechBg.sprite != null ? speechBg.sprite.bounds.size.x : 1f;
+        float sprH = speechBg.sprite != null ? speechBg.sprite.bounds.size.y : 1f;
+        speechBg.transform.localScale = new Vector3(bgWidth / sprW, bgHeight / sprH, 1f);
     }
 
     // ─── Utility ─────────────────────────────────────────────────
