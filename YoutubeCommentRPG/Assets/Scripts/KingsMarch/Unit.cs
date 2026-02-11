@@ -1403,13 +1403,17 @@ public class Unit : MonoBehaviour
                 nameLabel.transform.localScale = Vector3.one;
             if (nameShadow != null && nameShadow.transform.localScale.x < 0)
                 nameShadow.transform.localScale = Vector3.one;
+            if (speechText != null && speechText.transform.localScale.x < 0)
+                speechText.transform.localScale = Vector3.one;
             return;
         }
-        // 3D: 名前ラベルのX反転のみ
+        // 3D: テキストのX反転
         if (nameLabel != null)
             nameLabel.transform.localScale = new Vector3(-1f, 1f, 1f);
         if (nameShadow != null)
             nameShadow.transform.localScale = new Vector3(-1f, 1f, 1f);
+        if (speechText != null)
+            speechText.transform.localScale = new Vector3(-1f, 1f, 1f);
     }
 
     // ─── Face Icon (Profile Image) ──────────────────────────
