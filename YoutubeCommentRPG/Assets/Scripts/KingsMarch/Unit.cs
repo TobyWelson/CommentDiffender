@@ -2046,10 +2046,14 @@ public class Unit : MonoBehaviour
         if (activeText == null || speechBg == null) return;
         var mf = activeText.GetComponent<MeshFilter>();
         float bgWidth, bgHeight;
+        // 3DテキストはcharacterSize=1.8倍でmesh.boundsも大きいのでパディングを控えめに
+        bool is3DText = (activeText == speechText3D);
+        float wMul = is3DText ? 1.15f : 1.3f;
+        float wPad = is3DText ? 0.8f : 1.0f;
         if (mf != null && mf.sharedMesh != null && mf.sharedMesh.bounds.size.magnitude > 0.01f)
         {
             Bounds lb = mf.sharedMesh.bounds;
-            bgWidth = lb.size.x * 1.15f + 0.8f;
+            bgWidth = lb.size.x * wMul + wPad;
             bgHeight = lb.size.y + 0.6f;
         }
         else
@@ -2061,7 +2065,8 @@ public class Unit : MonoBehaviour
                 if (c == '\n') { lines++; curLen = 0; }
                 else { curLen++; if (curLen > maxLineLen) maxLineLen = curLen; }
             }
-            bgWidth = Mathf.Max(1.5f, maxLineLen * 0.35f + 0.8f);
+            float cPad = is3DText ? 0.35f : 0.4f;
+            bgWidth = Mathf.Max(1.5f, maxLineLen * cPad + wPad);
             bgHeight = Mathf.Max(0.8f, lines * 0.5f + 0.6f);
         }
         bgWidth = Mathf.Max(1.5f, bgWidth);
